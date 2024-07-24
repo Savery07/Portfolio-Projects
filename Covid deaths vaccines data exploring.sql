@@ -1,0 +1,198 @@
+select *
+from portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+where continent is not null
+order by 3,4
+
+--select *
+--from portfolio.dbo.[new vaccines - CovidVaccinations]
+--order by 3,4
+
+
+select location, date, total_cases, new_cases, total_deaths, population
+from portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+order by 1,2
+
+--Total Case vs Total Deaths
+-- shows liklihood of dying if you contract COVID in your country
+SELECT 
+    location, 
+    date, 
+    CAST(total_cases AS FLOAT) AS total_cases, 
+    CAST(total_deaths AS FLOAT) AS total_deaths, 
+    (CAST(total_deaths AS FLOAT) / NULLIF(CAST(total_cases AS FLOAT), 0)) * 100 AS DeathPercentage
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    location LIKE '%states%'
+	and continent is not null
+ORDER BY 
+    1, 
+    2;
+
+--Total Cases VS Population
+--shows what % of US population got COVID
+
+	SELECT 
+    location, 
+    date, 
+    population,
+    CAST(total_cases AS FLOAT) AS total_cases, 
+ (CAST(total_cases AS FLOAT) / NULLIF(CAST(population AS FLOAT), 0)) * 100 AS PercentPopulationInfected
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    location LIKE '%states%'
+ORDER BY 
+    1, 
+    2;
+
+-- Countries with highsted infection rate compared to population
+SELECT 
+    location, 
+    population,
+    MAX(CAST(total_cases AS FLOAT)) AS HighestInfectionCount, 
+    (MAX(CAST(total_cases AS FLOAT)) / NULLIF(CAST(population AS FLOAT), 0)) * 100 AS PercentPopulationInfected
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+GROUP BY 
+    location, 
+    population
+ORDER BY 
+    PercentPopulationInfected DESC;
+
+	--Countries with Highest Death Count 
+
+SELECT 
+    location, 
+    MAX(CAST(total_deaths AS INT)) AS TotalDeathCount
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    continent IS NOT NULL
+GROUP BY 
+    location
+ORDER BY 
+    TotalDeathCount DESC;
+
+--Breaking the data down by Continent and ordering with highest deaths per continent at the top
+--sum is adding total deatsh for locations with the same continent eg adding deaths of Canada and USA to make up North America
+-- not does not include world
+
+SELECT 
+    continent, 
+    SUM(CAST(total_deaths AS INT)) AS TotalDeathCount
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    continent IS NOT NULL
+	 AND continent != 'World'  -- Exclude "World" from the results
+GROUP BY 
+    continent
+ORDER BY 
+    TotalDeathCount DESC;
+
+
+	-- Get total death counts for the entire world
+SELECT 
+    'World' AS continent,
+    SUM(CAST(total_deaths AS INT)) AS TotalDeathCount
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    continent IS NOT NULL
+
+ORDER BY 
+    TotalDeathCount DESC;
+
+
+--Global Numbers
+
+-- Aggregate new cases by date, converting VARCHAR to INT
+-- Aggregate new cases and deaths by date, calculate death percentage
+SELECT 
+   SUM(CAST(new_cases AS INT)) AS TotalNewCases,
+    SUM(CAST(new_deaths AS INT)) AS TotalNewDeaths,
+    -- Calculate the death percentage
+    (SUM(CAST(new_deaths AS INT)) * 100.0) / NULLIF(SUM(CAST(new_cases AS INT)), 0) AS DeathPercentage
+FROM 
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)]
+WHERE 
+    continent IS NOT NULL
+ORDER BY 
+    1,2
+
+-- Total Population VS Vaccination
+
+	SELECT dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, SUM(CAST(vac.new_vaccinations as INT)) OVER (partition by dea.location ORDER BY dea.location, dea.date) as RollingPeopleVaccinated, 
+	(RollingPeopleVaccinated/population) * 100
+	FROM portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)] dea
+	JOIN portfolio.dbo.[new vaccines - CovidVaccinations] vac
+		ON dea.location = vac.location
+		and dea.date = vac.date
+	ORDER BY 2,3
+	
+
+-- USE CTE
+    WITH PopVSVac AS (
+    SELECT 
+        dea.continent, 
+        dea.location, 
+        dea.date, 
+        dea.population, 
+        vac.new_vaccinations,
+        SUM(CAST(vac.new_vaccinations AS BIGINT)) OVER (PARTITION BY dea.location ORDER BY dea.date) AS RollingPeopleVaccinated
+    FROM 
+        portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)] dea
+    JOIN 
+        portfolio.dbo.[new vaccines - CovidVaccinations] vac
+        ON dea.location = vac.location
+        AND dea.date = vac.date
+)
+SELECT 
+    Continent, 
+    Location, 
+    Date, 
+    Population, 
+	new_vaccinations,
+    RollingPeopleVaccinated, 
+    (CAST(RollingPeopleVaccinated AS FLOAT) / NULLIF(CAST(Population AS FLOAT), 0)) * 100 AS VaccinationPercentage
+FROM 
+    PopVSVac
+ORDER BY 
+    Location, 
+    Date;
+
+	
+-- CREATING A VIEW
+
+-- Drop the view if it exists
+IF OBJECT_ID('dbo.SimpleCovidView', 'V') IS NOT NULL
+    DROP VIEW dbo.SimpleCovidView;
+GO  -- End of batch
+
+-- Create the new view
+CREATE VIEW dbo.SimpleCovidView AS
+SELECT
+    dea.continent,
+    dea.location,
+    dea.date,
+    dea.population,
+    CAST(dea.total_cases AS FLOAT) AS total_cases,
+    CAST(dea.new_cases AS FLOAT) AS new_cases,
+    CAST(dea.total_deaths AS FLOAT) AS total_deaths,
+    CAST(dea.new_deaths AS FLOAT) AS new_deaths,
+    (CAST(dea.total_deaths AS FLOAT) / NULLIF(CAST(dea.total_cases AS FLOAT), 0)) * 100 AS DeathPercentage,
+    (CAST(dea.total_cases AS FLOAT) / NULLIF(CAST(dea.population AS FLOAT), 0)) * 100 AS PercentPopulationInfected,
+    SUM(CAST(vac.new_vaccinations AS INT)) OVER (PARTITION BY dea.location ORDER BY dea.date) AS RollingPeopleVaccinated,
+    (SUM(CAST(vac.new_vaccinations AS INT)) OVER (PARTITION BY dea.location ORDER BY dea.date) / NULLIF(CAST(dea.population AS FLOAT), 0)) * 100 AS VaccinationPercentage
+FROM
+    portfolio.dbo.[Covid deathsS.xlsx - CovidDeaths (1)] dea
+JOIN
+    portfolio.dbo.[new vaccines - CovidVaccinations] vac
+    ON dea.location = vac.location
+    AND dea.date = vac.date
+WHERE
+    dea.continent IS NOT NULL
+    AND dea.continent != 'World';
+GO  -- End of batch
+
